@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    triggers {
+        githubPush() // This is enabled if you checked "GitHub hook trigger for GITScm polling"
+    }
+
+    stages {
+        stage('Build on New/Updated MR') {
+            when {
+                anyOf {
+                    changeRequest event: 'opened'
+                    changeRequest event: 'synchronize'
+                }
+            }
+            steps {
+                echo "Building Merge Request: ${env.CHANGE_ID}"
+                echo "Target Branch: ${env.CHANGE_TARGET}"
+                echo "Source Branch: ${env.CHANGE_BRANCH}"
+
+                // Your build and test steps here (e.g., using Maven, Gradle, etc.)
+                script {
+                    if (isUnix()) {
+                        sh './mvnw clean package'
+                        sh './mvnw test'
+                    } else {
+                        bat 'mvnw.cmd clean package'
+                        bat 'mvnw.cmd test'
+                    }
+                }
+
+                // Update build status on GitHub (optional, but recommended)
+                updateGitlabCommitStatus name: 'build', state: 'pending'
+            }
+        }
+
+        stage('Build on Merge to Release') {
+            when {
+                branch 'main' // Or 'main', 'develop', etc., depending on your release branch
+                environment name: 'GIT_BRANCH', value: 'origin/main'
+            }
+            steps {
+                echo "Building release branch after merge..."
+
+                script {
+                    if (isUnix()) {
+                        sh './mvnw clean package'
+                        sh './mvnw test'
+                    } else {
+                        bat 'mvnw.cmd clean package'
+                        bat 'mvnw.cmd test'
+                    }
+                }
+            }
+            post {
+                success {
+                    echo "Release build successful!"
+                }
+                failure {
+                    echo "Release build failed!"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            updateGitlabCommitStatus name: 'build', state: 'success'
+        }
+        failure {
+            updateGitlabCommitStatus name: 'build', state: 'failure'
+        }
+    }
+}
